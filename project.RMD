@@ -1,0 +1,112 @@
+---
+title: "Machine Learning 1"
+output: html_document
+---
+
+# Introduction
+
+This is the main project for the Practical Machine Learning course in Coursera. In this project we have to study data taken from "fitness trackers" - devices designed to be portable and recolect exercise data from their users - in order to predict what kind of exercise was being practiced
+
+# Data acquisition
+
+The data was taken from http://groupware.les.inf.puc-rio.br/har, Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6
+
+For this case we suppose it is already downloaded and we only have to load it
+
+```{r}
+#data from http://groupware.les.inf.puc-rio.br/har 
+#mirror at https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+#Setting working directory
+setwd("~/Desktop/PracticalML/")
+training<-read.csv("./pml-training.csv")
+testing<-read.csv("./pml-testing.csv")
+library(caret)
+```
+
+We spit it in two gruops, training and testing. The training group will allow us to build the pedction system, while the testing one will help us assess the correctness of the implementation
+
+```{r}
+#separate training/testing
+inTrain = createDataPartition(training$classe , p = .6,list=FALSE)
+new_training = training[ inTrain,  ]
+new_testing = training[ -inTrain,  ]
+```
+
+# Data processing
+
+Here we try to reduce the number of parameters, removing the ones that:
+
+ * Were just indications about the obtention of the data. Those could be interesting for other types of study, like comparing correctnes of exercise executtion dependending on user, time series and so on, but here are unnecesasry
+ 
+ * Are zero or have near-zero variance. Those factors simpley don't have enough data to be relevant
+ 
+Finaly we cerciorate that all factors are "numeric", leaving only the prediction as class "factor"
+
+```{r}
+#training process
+#Remove cols 1:7:
+new_training<-new_training[,c(8:160)]
+#remove empty and near-zero varainze columns:
+new_training <- new_training[, which(as.numeric(colSums(is.na(new_training)))==0)]
+new_training <- new_training[, -(nearZeroVar(new_training))]
+#transform all columns except "classe" to numeric. classe still as factor
+new_training[,c(1:52)]<-sapply(new_training[,c(1:52)],as.numeric)
+```
+
+# Model creation
+
+The method applied to create a machine learning model is random forest (rf). It is one of the most powerful methods in ML, at a higher computational cost than others. In order to attenuate that cost we apply a prcincipal component analisis (pca) preprocessing scheme with a 90% explained varaince threshold, which implies losing some precission. 
+
+rf also helps with crossvalidation, as it is built to implicitely model and compare chunks of data to produce the best possible fit. That internal process results in a out-of-sample estimate error called out of the bag, oob error in the algorithm output.
+
+```{r, warning=FALSE}
+#apply random Fores method, with pca prefprocessing (reduce computational complexity) and a variance threshold of .9. 90% of variance explained by selected components.
+#intrinsecally applies internal crossvalidation, giving an out-of-the-sample  error aproximation (out of the bag error)
+modFit<-train(classe ~ .,method="rf", preProcess="pca", thresh=.9, data = new_training)
+print(modFit$finalModel)
+```
+
+
+# Model testing
+
+As a final step, we contrast what we have learned with the testing sample extracted from the data. The following matrix shows the % of accuracy for every level of the classe parameter, and the final results shows the overall precission
+
+```{r}
+#testing
+a=as.numeric(predict(modFit,newdata=new_testing))
+b=as.numeric(new_testing$classe)
+aux=table(a,b)
+mi_funcion = function(values){round(values/sum(values),3)}
+#factor level accuracy
+print (apply(aux,1,mi_funcion))
+
+#global accuracy %
+1-sum(as.numeric(a!=b))/length(b)
+```
+
+This global accuracy shows an error quite similar to the predicted oob error given by the rf algorithm
+
+# Comparision with full Random Forest Model (no PCA)
+
+To contrast this result we repeat the process for a rf with no preprocessing, getting the full variance of the data
+
+```{r}
+modFit<-train(classe ~ .,method="rf", data = new_training)
+
+a=as.numeric(predict(modFit,newdata=new_testing))
+b=as.numeric(new_testing$classe)
+aux=table(a,b)
+mi_funcion = function(values){round(values/sum(values),3)}
+
+#model Fit result
+print(modFit$finalModel)
+
+#factor level accuracy %
+apply(aux,1,mi_funcion)
+
+#global accuracy %
+1-sum(as.numeric(a!=b))/length(b)
+```
+
+
+In this case we get, as expected, an increase in accuracy along the matrix, but at a higher computational cost
